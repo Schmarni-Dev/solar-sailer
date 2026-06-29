@@ -1,9 +1,8 @@
-use std::sync::Arc;
-
-use glam::{Affine3A, Quat, Vec3};
+use glam::{Affine3A, Vec3};
 use libmonado::Monado;
 use stardust_xr_fusion::{
-	ClientHandle, objects::object_registry::ObjectRegistry, spatial::Transform,
+	client::{Client, ClientHandler},
+	spatial::Transform,
 };
 use tracing::error;
 
@@ -21,11 +20,7 @@ pub struct SolarSailer {
 }
 
 impl SolarSailer {
-	pub async fn new(
-		client: Arc<ClientHandle>,
-		object_registry: Arc<ObjectRegistry>,
-		input: Input,
-	) -> Self {
+	pub async fn new(client: &Client<impl ClientHandler>, input: Input) -> Self {
 		let monado = match Monado::auto_connect() {
 			Ok(v) => Some(v),
 			Err(err) => {
@@ -42,9 +37,7 @@ impl SolarSailer {
 			},
 			monado_movement,
 			input,
-			reparent_movement: ReparentMovement::new(&client, object_registry)
-				.await
-				.unwrap(),
+			reparent_movement: ReparentMovement::new(&client).await.unwrap(),
 			velocity: Vec3::ZERO,
 			moving: false,
 		}
@@ -52,10 +45,10 @@ impl SolarSailer {
 	pub fn should_switch_mode(&mut self) -> bool {
 		self.input.update_mode()
 	}
-	pub fn handle_input(&mut self) {
-		self.input.handle_input();
+	pub fn handle_input(&mut self, client: &Client<impl ClientHandler>) -> impl Future {
+		self.input.handle_input(&client)
 	}
-	pub async fn apply_offset(&mut self, delta_secs: f32) {
+	pub async fn apply_offset(&mut self, client: &Client<impl ClientHandler>, delta_secs: f32) {
 		let vel_ref = &self.input.get_velocity_space();
 		let fast_enough = self.velocity.length_squared() > 0.0005;
 		if self.moving && !fast_enough {
@@ -69,12 +62,12 @@ impl SolarSailer {
 			match (&self.mode, self.monado_movement.as_mut()) {
 				(Mode::MonadoOffset, Some(monado)) => {
 					monado
-						.apply_offset(delta_secs, vel_ref, self.velocity)
+						.apply_offset(client, delta_secs, vel_ref, self.velocity)
 						.await
 				}
 				(Mode::Reparent, _) => {
 					self.reparent_movement
-						.apply_offset(delta_secs, vel_ref, self.velocity)
+						.apply_offset(client, delta_secs, vel_ref, self.velocity)
 						.await
 				}
 				_ => {}
@@ -115,8 +108,8 @@ pub enum Mode {
 
 pub fn mat_from_transform(transform: &Transform) -> Affine3A {
 	Affine3A::from_scale_rotation_translation(
-		transform.scale.map(Vec3::from).unwrap_or(Vec3::ONE),
-		transform.rotation.map(Quat::from).unwrap_or(Quat::IDENTITY),
-		transform.translation.map(Vec3::from).unwrap_or(Vec3::ZERO),
+		transform.scale.into(),
+		transform.rotation.into(),
+		transform.translation.into(),
 	)
 }

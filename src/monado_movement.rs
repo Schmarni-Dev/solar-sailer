@@ -1,11 +1,9 @@
-use std::sync::Arc;
-
 use glam::Vec3;
 use libmonado::{Monado, Pose};
 use stardust_xr_fusion::{
-	ClientHandle,
-	objects::play_space,
-	spatial::{SpatialRef, SpatialRefAspect},
+	client::{Client, ClientHandler},
+	spatial::SpatialRef,
+	tracked::{Tracked, TrackedExt},
 };
 use tracing::error;
 
@@ -19,6 +17,7 @@ pub struct MonadoMovement {
 impl MonadoMovement {
 	pub async fn apply_offset(
 		&mut self,
+		client: &Client<impl ClientHandler>,
 		delta_secs: f32,
 		velocity_ref: &SpatialRef,
 		velocity: Vec3,
@@ -31,9 +30,15 @@ impl MonadoMovement {
 			return;
 		};
 
-		let Ok(transform) = velocity_ref
-			.get_transform(&self.stage)
+		let Ok(Ok(transform)) = client
+			.spatial_interface()
+			.get_relative_transform(self.stage.clone(), velocity_ref.clone())
 			.await
+			.map(|v| {
+				v.inspect_err(|err| {
+					error!("unable to get velocity_ref to stage transform: {err:?}")
+				})
+			})
 			.inspect_err(|err| error!("unable to get velocity_ref to stage transform: {err}"))
 		else {
 			return;
@@ -58,11 +63,14 @@ impl MonadoMovement {
 		}
 	}
 
-	pub async fn from_monado(client: &Arc<ClientHandle>, monado: Option<Monado>) -> Option<Self> {
+	pub async fn from_monado(
+		client: &Client<impl ClientHandler>,
+		monado: Option<Monado>,
+	) -> Option<Self> {
 		let monado = monado?;
 		Some(MonadoMovement {
 			monado,
-			stage: play_space(client).await?.spatial,
+			stage: Tracked::stage_spatial(client).await.ok()?,
 		})
 	}
 }
